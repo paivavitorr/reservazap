@@ -1,0 +1,21 @@
+logger:
+  enable: true
+  pretty_backtrace: true
+  level: debug
+
+server:
+  port: 3000
+  host: 0.0.0.0
+  expose_request_id: true
+
+database:
+  uri: postgres://postgres:postgres@localhost:5432/reservazap
+  enable_logging: true
+
+scheduler:
+  output: stdout
+  jobs:
+    expire_holds:
+      run: "expire_holds"
+      schedule: "*/1 * * * *"
+      tags: ["maintenance"]
