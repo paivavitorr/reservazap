@@ -50,7 +50,7 @@ impl MigrationTrait for Migration {
 }
 
 #[derive(DeriveIden)]
-enum Services {
+pub enum Services {
     Table,
     Id,
     TenantId,

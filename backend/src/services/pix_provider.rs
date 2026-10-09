@@ -21,7 +21,7 @@ pub trait PixProvider: Send + Sync {
     async fn criar_cobranca(
         &self,
         valor_centavos: i64,
-        descricao: &str,
+        _descricao: &str,
         expiracao_segundos: u32,
     ) -> Result<PixCharge, PixError>;
 }
@@ -33,7 +33,7 @@ impl PixProvider for MockPixProvider {
     async fn criar_cobranca(
         &self,
         valor_centavos: i64,
-        descricao: &str,
+        _descricao: &str,
         expiracao_segundos: u32,
     ) -> Result<PixCharge, PixError> {
         let txid = Uuid::new_v4().to_string().replace('-', "")[..26].to_string();

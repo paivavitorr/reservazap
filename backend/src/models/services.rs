@@ -1,4 +1,4 @@
-use sea_orm::{DatabaseConnection, QueryOrder};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
 use super::_entities::services::{self, Entity as Service};
 
 pub struct ServiceModel;

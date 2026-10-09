@@ -1,21 +1,17 @@
 use async_trait::async_trait;
 use loco_rs::{
     app::{AppContext, Hooks},
+    bgworker::Queue,
     boot::{create_app, BootResult, StartMode},
+    config::Config,
     controller::AppRoutes,
     environment::Environment,
-    prelude::*,
     task::Tasks,
     Result,
 };
-use sea_orm::DatabaseConnection;
 use std::path::Path;
 
-pub mod controllers;
-pub mod models;
-pub mod services;
-pub mod tasks;
-
+use crate::{controllers, tasks};
 use migration::Migrator;
 
 pub struct App;

@@ -50,6 +50,7 @@ impl ActiveModelBehavior for ActiveModel {}
 
 impl Entity {
     pub fn find_by_slug(slug: &str) -> Select<Self> {
+        use sea_orm::QueryFilter;
         Self::find().filter(Column::Slug.eq(slug))
     }
 }

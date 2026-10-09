@@ -1,5 +1,5 @@
-use chrono::{DateTime, Utc};
-use sea_orm::{ActiveModelTrait, DatabaseConnection, Set};
+use chrono::Utc;
+use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use uuid::Uuid;
 
 use super::_entities::appointments::{self, AppointmentStatus, Entity as Appointment};
@@ -25,8 +25,8 @@ impl AppointmentModel {
         tenant_id: Uuid,
         service_id: Uuid,
         professional_id: Uuid,
-        starts_at: DateTime<Utc>,
-        ends_at: DateTime<Utc>,
+        starts_at: chrono::DateTime<chrono::Utc>,
+        ends_at: chrono::DateTime<chrono::Utc>,
         client_name: String,
         client_phone: String,
         client_email: Option<String>,
@@ -34,7 +34,7 @@ impl AppointmentModel {
         hold_minutes: i32,
         pix_txid: String,
         pix_payload: String,
-    ) -> Result<appointments::Model>, sea_orm::DbErr> {
+    ) -> Result<appointments::Model, sea_orm::DbErr> {
         let now = Utc::now().fixed_offset();
         let hold_expires = (now + chrono::Duration::minutes(hold_minutes as i64)).fixed_offset();
 

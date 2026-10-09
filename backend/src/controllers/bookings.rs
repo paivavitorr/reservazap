@@ -54,10 +54,10 @@ async fn create_intent(
 ) -> Result<Json<BookingIntentResponse>> {
     let tenant = TenantModel::find_by_slug(&ctx.db, &slug)
         .await?
-        .ok_or_else(|| Error::not_found("tenant não encontrado"))?;
+        .ok_or(Error::NotFound)?;
 
     if !tenant.is_active {
-        return Err(Error::not_found("tenant inativo"));
+        return Err(Error::NotFound);
     }
 
     let pix = MockPixProvider;
@@ -77,9 +77,9 @@ async fn create_intent(
     )
     .await
     .map_err(|e| match e {
-        BookingError::SlotUnavailable => Error::message("horário indisponível"),
-        BookingError::ServiceNotFound => Error::not_found("serviço não encontrado"),
-        BookingError::ProfessionalNotFound => Error::not_found("profissional não encontrado"),
+        BookingError::SlotUnavailable => Error::Message("horário indisponível".to_string()),
+        BookingError::ServiceNotFound => Error::NotFound,
+        BookingError::ProfessionalNotFound => Error::NotFound,
         other => Error::string(&other.to_string()),
     })?;
 
@@ -105,12 +105,12 @@ async fn get_status(
 ) -> Result<Json<StatusResponse>> {
     let _tenant = TenantModel::find_by_slug(&ctx.db, &slug)
         .await?
-        .ok_or_else(|| Error::not_found("tenant não encontrado"))?;
+        .ok_or(Error::NotFound)?;
 
     let (status, paid_at) = BookingService::status_agendamento(&ctx.db, appointment_id)
         .await
         .map_err(|e| match e {
-            BookingError::AppointmentNotFound => Error::not_found("agendamento não encontrado"),
+            BookingError::AppointmentNotFound => Error::NotFound,
             other => Error::string(&other.to_string()),
         })?;
 

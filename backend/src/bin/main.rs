@@ -1,7 +1,7 @@
-use loco_rs::cli;
+use migration::Migrator;
 use reservazap::app::App;
 
 #[tokio::main]
 async fn main() -> loco_rs::Result<()> {
-    cli::run_main::<App>().await
+    loco_rs::cli::main::<App, Migrator>().await
 }

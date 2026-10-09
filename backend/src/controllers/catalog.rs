@@ -43,7 +43,7 @@ async fn get_catalog(
 ) -> Result<Json<CatalogResponse>> {
     let tenant = TenantModel::find_by_slug(&ctx.db, &slug)
         .await?
-        .ok_or_else(|| Error::not_found("tenant não encontrado"))?;
+        .ok_or(Error::NotFound)?;
 
     let services = ServiceModel::find_by_tenant(&ctx.db, tenant.id).await?;
     let professionals = ProfessionalModel::find_by_tenant(&ctx.db, tenant.id).await?;

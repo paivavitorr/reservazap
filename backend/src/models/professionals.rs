@@ -1,4 +1,4 @@
-use sea_orm::{DatabaseConnection, QueryOrder};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
 use super::_entities::professionals::{self, Entity as Professional};
 
 pub struct ProfessionalModel;

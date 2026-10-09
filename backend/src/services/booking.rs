@@ -42,6 +42,7 @@ impl BookingService {
         client_email: Option<String>,
         hold_minutes: i32,
     ) -> Result<(Uuid, PixCharge, DateTime<Utc>), BookingError> {
+        use sea_orm::EntityTrait;
         let service = services::Entity::find_by_id(service_id)
             .one(db)
             .await?
