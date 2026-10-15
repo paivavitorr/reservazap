@@ -1,0 +1,56 @@
+# Configuração de produção — todos os valores sensíveis vêm de variáveis
+# de ambiente (veja .env.example e README.md).
+
+logger:
+  enable: true
+  pretty_backtrace: false
+  level: info
+  format: json
+
+server:
+  port: 3000
+  host: <%= get_env(name="PUBLIC_HOST", default="http://localhost") %>
+  binding: 0.0.0.0
+  expose_request_id: true
+  middlewares:
+    cors:
+      enable: true
+      # API pública (webhooks e páginas de agendamento); restrinja aqui se
+      # quiser liberar apenas o domínio do frontend
+      allow_origins: ["*"]
+      allow_headers: ["*"]
+      allow_methods: ["*"]
+
+database:
+  uri: <%= get_env(name="DATABASE_URL") %>
+  enable_logging: false
+  min_connections: 2
+  max_connections: 20
+  connect_timeout: 5000
+  idle_timeout: 5000
+  auto_migrate: true
+
+auth:
+  jwt:
+    # deve ser uma string base64 de ao menos 32 bytes (ex.: openssl rand -base64 48)
+    secret: <%= get_env(name="JWT_SECRET") %>
+    expiration: <%= get_env(name="JWT_EXPIRATION", default="604800") %>
+
+workers:
+  mode: BackgroundAsync
+
+scheduler:
+  output: stdout
+  jobs:
+    expire_holds:
+      run: "expire_holds"
+      schedule: "0 */1 * * * *"
+      tags: ["maintenance"]
+    send_reminders:
+      run: "send_reminders"
+      schedule: "0 */5 * * * *"
+      tags: ["notifications"]
+
+# Providers (Pix e WhatsApp) são selecionados por env:
+#   PIX_PROVIDER=mercadopago  + MERCADOPAGO_ACCESS_TOKEN / MERCADOPAGO_WEBHOOK_SECRET
+#   NOTIFICATION_PROVIDER=evolution + EVOLUTION_API_URL / EVOLUTION_API_KEY / EVOLUTION_INSTANCE

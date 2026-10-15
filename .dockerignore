@@ -1,0 +1,7 @@
+target/
+node_modules/
+.nuxt/
+.output/
+.git/
+*.log
+CODE_REVIEW.md
