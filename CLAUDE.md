@@ -48,3 +48,4 @@ make dev            # Sobe o Postgres e mostra os próximos passos
 - Backend em `localhost:3000` (`/api/...`); frontend em `localhost:3001` com proxy `/api` (Nuxt dev) e CORS habilitado no backend
 - Horários trafegam em UTC (ISO-8601); exibição no fuso do tenant (`tenants.timezone`)
 - Dados de demo: slug `barbearia-do-zeu` criado por `make be-seed`
+- Painel do prestador em `/painel` (JWT); documentação principal no `README.md` e `docs/ARQUITETURA.md`
