@@ -20,25 +20,77 @@ impl MigrationTrait for Migration {
             .create_table(
                 Table::create()
                     .table(Appointments::Table)
-                    .col(ColumnDef::new(Appointments::Id).uuid().not_null().primary_key().default(Expr::cust("gen_random_uuid()")))
+                    .col(
+                        ColumnDef::new(Appointments::Id)
+                            .uuid()
+                            .not_null()
+                            .primary_key()
+                            .default(Expr::cust("gen_random_uuid()")),
+                    )
                     .col(ColumnDef::new(Appointments::TenantId).uuid().not_null())
                     .col(ColumnDef::new(Appointments::ServiceId).uuid().not_null())
-                    .col(ColumnDef::new(Appointments::ProfessionalId).uuid().not_null())
-                    .col(ColumnDef::new(Appointments::StartsAt).timestamp_with_time_zone().not_null())
-                    .col(ColumnDef::new(Appointments::EndsAt).timestamp_with_time_zone().not_null())
-                    .col(ColumnDef::new(Appointments::ClientName).string_len(120).not_null())
-                    .col(ColumnDef::new(Appointments::ClientPhone).string_len(20).not_null())
+                    .col(
+                        ColumnDef::new(Appointments::ProfessionalId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(Appointments::StartsAt)
+                            .timestamp_with_time_zone()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(Appointments::EndsAt)
+                            .timestamp_with_time_zone()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(Appointments::ClientName)
+                            .string_len(120)
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(Appointments::ClientPhone)
+                            .string_len(20)
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(Appointments::ClientEmail).string_len(160))
-                    .col(ColumnDef::new(Appointments::Status).string_len(24).not_null())
-                    .col(ColumnDef::new(Appointments::SignalAmountInCents).big_integer().not_null())
+                    .col(
+                        ColumnDef::new(Appointments::Status)
+                            .string_len(24)
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(Appointments::SignalAmountInCents)
+                            .big_integer()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(Appointments::SignalPaidAt).timestamp_with_time_zone())
-                    .col(ColumnDef::new(Appointments::PixTxid).string_len(64).unique_key())
+                    .col(
+                        ColumnDef::new(Appointments::PixTxid)
+                            .string_len(64)
+                            .unique_key(),
+                    )
                     .col(ColumnDef::new(Appointments::PixPayload).text())
-                    .col(ColumnDef::new(Appointments::HoldExpiresAt).timestamp_with_time_zone().not_null())
+                    .col(
+                        ColumnDef::new(Appointments::HoldExpiresAt)
+                            .timestamp_with_time_zone()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(Appointments::CancelledAt).timestamp_with_time_zone())
                     .col(ColumnDef::new(Appointments::CancellationReason).text())
-                    .col(ColumnDef::new(Appointments::CreatedAt).timestamp_with_time_zone().not_null().default(Expr::cust("now()")))
-                    .col(ColumnDef::new(Appointments::UpdatedAt).timestamp_with_time_zone().not_null().default(Expr::cust("now()")))
+                    .col(
+                        ColumnDef::new(Appointments::CreatedAt)
+                            .timestamp_with_time_zone()
+                            .not_null()
+                            .default(Expr::cust("now()")),
+                    )
+                    .col(
+                        ColumnDef::new(Appointments::UpdatedAt)
+                            .timestamp_with_time_zone()
+                            .not_null()
+                            .default(Expr::cust("now()")),
+                    )
                     .foreign_key(
                         ForeignKey::create()
                             .from(Appointments::Table, Appointments::TenantId)
@@ -98,7 +150,9 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        manager.drop_table(Table::drop().table(Appointments::Table).to_owned()).await
+        manager
+            .drop_table(Table::drop().table(Appointments::Table).to_owned())
+            .await
     }
 }
 

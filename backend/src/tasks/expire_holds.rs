@@ -1,5 +1,5 @@
-use loco_rs::prelude::*;
 use crate::models::appointments::AppointmentModel;
+use loco_rs::prelude::*;
 
 pub struct ExpireHolds;
 
