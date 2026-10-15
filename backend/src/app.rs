@@ -1,13 +1,13 @@
 use async_trait::async_trait;
 use loco_rs::{
+    Result,
     app::{AppContext, Hooks},
     bgworker::Queue,
-    boot::{create_app, BootResult, StartMode},
+    boot::{BootResult, StartMode, create_app},
     config::Config,
     controller::AppRoutes,
     environment::Environment,
     task::Tasks,
-    Result,
 };
 use std::path::Path;
 
@@ -22,7 +22,11 @@ impl Hooks for App {
         "reservazap"
     }
 
-    async fn boot(mode: StartMode, environment: &Environment, config: Config) -> Result<BootResult> {
+    async fn boot(
+        mode: StartMode,
+        environment: &Environment,
+        config: Config,
+    ) -> Result<BootResult> {
         create_app::<Self, Migrator>(mode, environment, config).await
     }
 
@@ -31,6 +35,7 @@ impl Hooks for App {
             .prefix("api")
             .add_route(controllers::bookings::routes())
             .add_route(controllers::catalog::routes())
+            .add_route(controllers::webhooks::routes())
     }
 
     async fn connect_workers(_ctx: &AppContext, _queue: &Queue) -> Result<()> {
@@ -45,7 +50,7 @@ impl Hooks for App {
         Ok(())
     }
 
-    async fn seed(_ctx: &AppContext, _base: &Path) -> Result<()> {
-        Ok(())
+    async fn seed(ctx: &AppContext, _base: &Path) -> Result<()> {
+        Ok(crate::seed::seed_demo(&ctx.db).await?)
     }
 }

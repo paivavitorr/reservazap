@@ -7,11 +7,57 @@ use super::_entities::appointments::{self, AppointmentStatus, Entity as Appointm
 pub struct AppointmentModel;
 
 impl AppointmentModel {
-    pub async fn find_by_id(db: &DatabaseConnection, id: Uuid) -> Result<Option<appointments::Model>, sea_orm::DbErr> {
+    pub async fn find_by_id(
+        db: &DatabaseConnection,
+        id: Uuid,
+    ) -> Result<Option<appointments::Model>, sea_orm::DbErr> {
         Appointment::find_by_id(id).one(db).await
     }
 
-    pub async fn find_expired_holds(db: &DatabaseConnection) -> Result<Vec<appointments::Model>, sea_orm::DbErr> {
+    pub async fn find_by_id_for_tenant(
+        db: &DatabaseConnection,
+        tenant_id: Uuid,
+        id: Uuid,
+    ) -> Result<Option<appointments::Model>, sea_orm::DbErr> {
+        Appointment::find_by_id(id)
+            .filter(appointments::Column::TenantId.eq(tenant_id))
+            .one(db)
+            .await
+    }
+
+    pub async fn find_by_txid(
+        db: &DatabaseConnection,
+        txid: &str,
+    ) -> Result<Option<appointments::Model>, sea_orm::DbErr> {
+        Appointment::find()
+            .filter(appointments::Column::PixTxid.eq(txid))
+            .one(db)
+            .await
+    }
+
+    /// Agendamentos ativos (hold/confirmed) de um profissional que se sobrepõem
+    /// ao intervalo `[starts_at, ends_at)`.
+    pub async fn find_active_overlapping(
+        db: &DatabaseConnection,
+        professional_id: Uuid,
+        starts_at: chrono::DateTime<Utc>,
+        ends_at: chrono::DateTime<Utc>,
+    ) -> Result<Vec<appointments::Model>, sea_orm::DbErr> {
+        Appointment::find()
+            .filter(appointments::Column::ProfessionalId.eq(professional_id))
+            .filter(
+                appointments::Column::Status
+                    .is_in([AppointmentStatus::Hold, AppointmentStatus::Confirmed]),
+            )
+            .filter(appointments::Column::StartsAt.lt(ends_at.fixed_offset()))
+            .filter(appointments::Column::EndsAt.gt(starts_at.fixed_offset()))
+            .all(db)
+            .await
+    }
+
+    pub async fn find_expired_holds(
+        db: &DatabaseConnection,
+    ) -> Result<Vec<appointments::Model>, sea_orm::DbErr> {
         let now = Utc::now().fixed_offset();
         Appointment::find()
             .filter(appointments::Column::Status.eq(AppointmentStatus::Hold))
@@ -20,13 +66,14 @@ impl AppointmentModel {
             .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_hold(
         db: &DatabaseConnection,
         tenant_id: Uuid,
         service_id: Uuid,
         professional_id: Uuid,
-        starts_at: chrono::DateTime<chrono::Utc>,
-        ends_at: chrono::DateTime<chrono::Utc>,
+        starts_at: chrono::DateTime<Utc>,
+        ends_at: chrono::DateTime<Utc>,
         client_name: String,
         client_phone: String,
         client_email: Option<String>,
@@ -63,33 +110,43 @@ impl AppointmentModel {
         active.insert(db).await
     }
 
+    /// Marca um hold vencido como `expired`. Só afeta linhas ainda em `hold`,
+    /// então uma confirmação concorrente nunca é sobrescrita.
     pub async fn mark_expired(db: &DatabaseConnection, id: Uuid) -> Result<(), sea_orm::DbErr> {
         let now = Utc::now().fixed_offset();
-        if let Some(model) = Appointment::find_by_id(id).one(db).await? {
-            let mut active: appointments::ActiveModel = model.into();
-            active.status = Set(AppointmentStatus::Expired);
-            active.updated_at = Set(now);
-            active.update(db).await?;
-        }
+        Appointment::update_many()
+            .set(appointments::ActiveModel {
+                status: Set(AppointmentStatus::Expired),
+                updated_at: Set(now),
+                ..Default::default()
+            })
+            .filter(appointments::Column::Id.eq(id))
+            .filter(appointments::Column::Status.eq(AppointmentStatus::Hold))
+            .exec(db)
+            .await?;
         Ok(())
     }
 
-    pub async fn confirm_payment(db: &DatabaseConnection, id: Uuid) -> Result<bool, sea_orm::DbErr> {
+    /// Confirma o pagamento do sinal de forma atômica: `hold` → `confirmed`
+    /// somente se o hold ainda não venceu. Retorna `false` quando a transição
+    /// não se aplica (já confirmado, expirado ou cancelado).
+    pub async fn confirm_payment(
+        db: &DatabaseConnection,
+        id: Uuid,
+    ) -> Result<bool, sea_orm::DbErr> {
         let now = Utc::now().fixed_offset();
-        if let Some(model) = Appointment::find_by_id(id).one(db).await? {
-            if model.status != AppointmentStatus::Hold {
-                return Ok(false);
-            }
-            if model.hold_expires_at < now {
-                return Ok(false);
-            }
-            let mut active: appointments::ActiveModel = model.into();
-            active.status = Set(AppointmentStatus::Confirmed);
-            active.signal_paid_at = Set(Some(now));
-            active.updated_at = Set(now);
-            active.update(db).await?;
-            return Ok(true);
-        }
-        Ok(false)
+        let res = Appointment::update_many()
+            .set(appointments::ActiveModel {
+                status: Set(AppointmentStatus::Confirmed),
+                signal_paid_at: Set(Some(now)),
+                updated_at: Set(now),
+                ..Default::default()
+            })
+            .filter(appointments::Column::Id.eq(id))
+            .filter(appointments::Column::Status.eq(AppointmentStatus::Hold))
+            .filter(appointments::Column::HoldExpiresAt.gt(now))
+            .exec(db)
+            .await?;
+        Ok(res.rows_affected == 1)
     }
 }

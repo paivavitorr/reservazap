@@ -19,6 +19,17 @@ pub enum AppointmentStatus {
 }
 
 impl AppointmentStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Hold => "hold",
+            Self::Confirmed => "confirmed",
+            Self::Completed => "completed",
+            Self::Cancelled => "cancelled",
+            Self::NoShow => "no_show",
+            Self::Expired => "expired",
+        }
+    }
+
     pub fn is_hold(&self) -> bool {
         matches!(self, Self::Hold)
     }

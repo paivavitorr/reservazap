@@ -3,9 +3,9 @@ use loco_rs::prelude::*;
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::models::tenants::TenantModel;
-use crate::models::services::ServiceModel;
 use crate::models::professionals::ProfessionalModel;
+use crate::models::services::ServiceModel;
+use crate::models::tenants::TenantModel;
 
 #[derive(Debug, Serialize)]
 pub struct CatalogResponse {
@@ -19,6 +19,8 @@ pub struct TenantInfo {
     pub id: Uuid,
     pub name: String,
     pub slug: String,
+    pub timezone: String,
+    pub booking_hold_minutes: i32,
 }
 
 #[derive(Debug, Serialize)]
@@ -53,6 +55,8 @@ async fn get_catalog(
             id: tenant.id,
             name: tenant.name,
             slug: tenant.slug,
+            timezone: tenant.timezone,
+            booking_hold_minutes: tenant.booking_hold_minutes,
         },
         services: services
             .into_iter()
