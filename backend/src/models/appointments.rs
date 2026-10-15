@@ -1,4 +1,5 @@
 use chrono::Utc;
+use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
 };
@@ -80,6 +81,7 @@ impl AppointmentModel {
     }
 
     /// Agendamentos de um cliente pelo telefone (LGPD: exportação de dados).
+    /// Compara apenas os dígitos — casa o telefone salvo com ou sem máscara.
     pub async fn find_por_telefone(
         db: &DatabaseConnection,
         tenant_id: Uuid,
@@ -87,7 +89,10 @@ impl AppointmentModel {
     ) -> Result<Vec<appointments::Model>, sea_orm::DbErr> {
         Appointment::find()
             .filter(appointments::Column::TenantId.eq(tenant_id))
-            .filter(appointments::Column::ClientPhone.eq(telefone))
+            .filter(Expr::cust_with_values(
+                "regexp_replace(client_phone, '\\D', '', 'g') = $1",
+                [telefone],
+            ))
             .order_by_asc(appointments::Column::StartsAt)
             .all(db)
             .await
@@ -104,13 +109,16 @@ impl AppointmentModel {
         let res = Appointment::update_many()
             .set(appointments::ActiveModel {
                 client_name: Set("Cliente removido".to_string()),
-                client_phone: Set("00000000000".to_string()),
+                client_phone: Set("removido".to_string()),
                 client_email: Set(None),
                 updated_at: Set(now),
                 ..Default::default()
             })
             .filter(appointments::Column::TenantId.eq(tenant_id))
-            .filter(appointments::Column::ClientPhone.eq(telefone))
+            .filter(Expr::cust_with_values(
+                "regexp_replace(client_phone, '\\D', '', 'g') = $1",
+                [telefone],
+            ))
             .exec(db)
             .await?;
         Ok(res.rows_affected)

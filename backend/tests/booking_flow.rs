@@ -633,9 +633,12 @@ async fn lgpd_anonimiza_dados_do_cliente() {
         .unwrap();
     assert_eq!(alterados, 1);
 
-    let appt = AppointmentModel::find_by_id(&db, appointment_id).await.unwrap().unwrap();
+    let appt = AppointmentModel::find_by_id(&db, appointment_id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(appt.client_name, "Cliente removido");
-    assert_eq!(appt.client_phone, "00000000000");
+    assert_eq!(appt.client_phone, "removido");
     assert!(appt.client_email.is_none());
 
     limpar_fixture(&db, f.tenant_id).await;

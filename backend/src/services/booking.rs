@@ -62,6 +62,11 @@ impl BookingService {
         use sea_orm::EntityTrait;
 
         validar_cliente(&client_name, &client_phone, client_email.as_deref())?;
+        // grava apenas os dígitos — consultas LGPD e formatação ficam consistentes
+        let client_phone: String = client_phone
+            .chars()
+            .filter(|c| c.is_ascii_digit())
+            .collect();
 
         let hold_minutes = tenant.booking_hold_minutes;
         if hold_minutes <= 0 {
