@@ -1,10 +1,15 @@
+use axum::extract::Query;
+use axum::http::HeaderMap;
 use axum::routing::post;
 use loco_rs::prelude::*;
 use serde::Deserialize;
+use std::collections::HashMap;
 
+use crate::models::payments::PaymentModel;
 use crate::services::booking::{BookingError, BookingService};
+use crate::services::pix_provider::{self, PixStatus};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, serde::Serialize)]
 pub struct PixWebhookPayload {
     pub txid: String,
     pub status: String,
@@ -16,9 +21,8 @@ pub struct WebhookResponse {
     pub appointment_status: Option<String>,
 }
 
-/// Webhook de confirmação de pagamento Pix.
+/// Webhook de confirmação de pagamento Pix (contrato do provedor mock).
 ///
-/// Contrato do provedor mock (Fase 2 substitui pela validação do PSP):
 /// `{ "txid": "...", "status": "paid" }`. Idempotente por `txid` — entregar o
 /// mesmo evento duas vezes não duplica confirmação.
 async fn pix_webhook(
@@ -31,23 +35,18 @@ async fn pix_webhook(
 
     match payload.status.as_str() {
         "paid" => {
-            let confirmado = BookingService::confirmar_por_txid(&ctx.db, &payload.txid)
-                .await
-                .map_err(|e| match e {
-                    BookingError::AppointmentNotFound => Error::NotFound,
-                    BookingError::InvalidTransition => {
-                        Error::BadRequest("agendamento não está mais em aberto".to_string())
-                    }
-                    other => Error::string(&other.to_string()),
-                })?;
+            let confirmado = BookingService::confirmar_por_txid(
+                &ctx.db,
+                "mock",
+                &payload.txid,
+                Some(serde_json::to_string(&payload).unwrap_or_default()),
+            )
+            .await
+            .map_err(map_webhook_error)?;
             if !confirmado {
-                tracing::warn!(
-                    txid = %payload.txid,
-                    "pagamento recebido com hold vencido — horário não confirmado"
-                );
                 return Ok(Json(WebhookResponse {
                     ok: false,
-                    appointment_status: Some("expired".to_string()),
+                    appointment_status: Some("late_paid".to_string()),
                 }));
             }
             Ok(Json(WebhookResponse {
@@ -55,11 +54,141 @@ async fn pix_webhook(
                 appointment_status: Some("confirmed".to_string()),
             }))
         }
-        "cancelled" => Ok(Json(WebhookResponse {
+        "cancelled" => {
+            PaymentModel::atualizar_status(
+                &ctx.db,
+                &payload.txid,
+                crate::models::_entities::payments::PaymentStatus::Cancelled,
+                None,
+                None,
+            )
+            .await?;
+            Ok(Json(WebhookResponse {
+                ok: true,
+                appointment_status: None,
+            }))
+        }
+        _ => Err(Error::BadRequest("status desconhecido".to_string())),
+    }
+}
+
+/// Webhook do Mercado Pago (`payment.updated`).
+///
+/// Fluxo seguro: valida a assinatura `x-signature`, **consulta o pagamento no
+/// PSP** (não confia no corpo do webhook) e só então confirma — idempotente.
+async fn mercado_pago_webhook(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Query(query): Query<HashMap<String, String>>,
+    body: Json<serde_json::Value>,
+) -> Result<Json<WebhookResponse>> {
+    let txid = query
+        .get("data.id")
+        .cloned()
+        .or_else(|| {
+            body.0
+                .get("data")
+                .and_then(|d| d.get("id"))
+                .map(|v| v.to_string().trim_matches('"').to_string())
+        })
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| Error::BadRequest("data.id obrigatório".to_string()))?;
+
+    let secret = std::env::var("MERCADOPAGO_WEBHOOK_SECRET").unwrap_or_default();
+    let em_producao = std::env::var("LOCO_ENV").unwrap_or_default() == "production";
+    if secret.is_empty() {
+        if em_producao {
+            return Err(Error::Unauthorized(
+                "webhook sem secret configurado".to_string(),
+            ));
+        }
+        tracing::warn!("MERCADOPAGO_WEBHOOK_SECRET não configurado — assinatura não validada");
+    } else {
+        let signature = header_str(&headers, "x-signature").unwrap_or_default();
+        let request_id = header_str(&headers, "x-request-id").unwrap_or_default();
+        let (ts, v1) = pix_provider::parse_x_signature(&signature)
+            .ok_or_else(|| Error::Unauthorized("assinatura ausente".to_string()))?;
+        if !pix_provider::assinatura_webhook_valida(&secret, &txid, &request_id, &ts, &v1) {
+            return Err(Error::Unauthorized("assinatura inválida".to_string()));
+        }
+    }
+
+    // confere a situação real no PSP antes de agir
+    let pix = pix_provider::from_env();
+    let status = pix
+        .consultar_cobranca(&txid)
+        .await
+        .map_err(|e| Error::string(&e.to_string()))?;
+
+    match status {
+        PixStatus::Paid => {
+            let confirmado = BookingService::confirmar_por_txid(
+                &ctx.db,
+                "mercadopago",
+                &txid,
+                Some(body.0.to_string()),
+            )
+            .await
+            .map_err(map_webhook_error)?;
+            Ok(Json(WebhookResponse {
+                ok: confirmado,
+                appointment_status: Some(if confirmado {
+                    "confirmed".to_string()
+                } else {
+                    "late_paid".to_string()
+                }),
+            }))
+        }
+        PixStatus::Cancelled => {
+            PaymentModel::atualizar_status(
+                &ctx.db,
+                &txid,
+                crate::models::_entities::payments::PaymentStatus::Cancelled,
+                None,
+                Some(body.0.to_string()),
+            )
+            .await?;
+            Ok(Json(WebhookResponse {
+                ok: true,
+                appointment_status: None,
+            }))
+        }
+        PixStatus::Expired => {
+            PaymentModel::atualizar_status(
+                &ctx.db,
+                &txid,
+                crate::models::_entities::payments::PaymentStatus::Expired,
+                None,
+                Some(body.0.to_string()),
+            )
+            .await?;
+            Ok(Json(WebhookResponse {
+                ok: true,
+                appointment_status: None,
+            }))
+        }
+        // ainda pendente ou desconhecido: não faz nada e acalma o retry do PSP
+        _ => Ok(Json(WebhookResponse {
             ok: true,
             appointment_status: None,
         })),
-        _ => Err(Error::BadRequest("status desconhecido".to_string())),
+    }
+}
+
+fn header_str(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+}
+
+fn map_webhook_error(e: BookingError) -> Error {
+    match e {
+        BookingError::AppointmentNotFound => Error::NotFound,
+        BookingError::InvalidTransition => {
+            Error::BadRequest("agendamento não está mais em aberto".to_string())
+        }
+        other => Error::string(&other.to_string()),
     }
 }
 
@@ -67,4 +196,5 @@ pub fn routes() -> Routes {
     Routes::new()
         .prefix("webhooks")
         .add("/pix", post(pix_webhook))
+        .add("/pix/mercadopago", post(mercado_pago_webhook))
 }

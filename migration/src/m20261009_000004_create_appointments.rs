@@ -157,7 +157,7 @@ impl MigrationTrait for Migration {
 }
 
 #[derive(DeriveIden)]
-enum Appointments {
+pub enum Appointments {
     Table,
     Id,
     TenantId,

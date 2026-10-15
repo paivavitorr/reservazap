@@ -10,7 +10,7 @@ use crate::models::professionals::ProfessionalModel;
 use crate::models::tenants::TenantModel;
 use crate::services::availability::{self, AvailabilityError};
 use crate::services::booking::{BookingError, BookingService};
-use crate::services::pix_provider::MockPixProvider;
+use crate::services::pix_provider;
 
 #[derive(Debug, Deserialize)]
 pub struct BookingIntentPayload {
@@ -84,11 +84,11 @@ async fn create_intent(
         return Err(Error::NotFound);
     }
 
-    let pix = MockPixProvider;
+    let pix = pix_provider::from_env();
 
     let (appointment_id, charge, hold_expires) = BookingService::criar_intencao(
         &ctx.db,
-        &pix,
+        pix.as_ref(),
         &tenant,
         payload.service_id,
         payload.professional_id,

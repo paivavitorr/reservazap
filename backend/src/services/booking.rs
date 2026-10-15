@@ -4,11 +4,13 @@ use uuid::Uuid;
 
 use super::availability::{carregar_expediente, slot_cabe_no_expediente};
 use super::pix_provider::{PixCharge, PixProvider};
-use crate::models::_entities::appointments::AppointmentStatus;
+use crate::models::_entities::appointments::{self, AppointmentStatus};
+use crate::models::_entities::payments::PaymentStatus;
 use crate::models::_entities::professionals;
 use crate::models::_entities::services;
 use crate::models::_entities::tenants;
 use crate::models::appointments::AppointmentModel;
+use crate::models::payments::PaymentModel;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BookingError {
@@ -106,6 +108,7 @@ impl BookingService {
                 signal_amount,
                 &format!("Sinal - {}", service.name),
                 (hold_minutes * 60) as u32,
+                client_email.as_deref(),
             )
             .await
             .map_err(|e| BookingError::PixFailed(e.to_string()))?;
@@ -145,6 +148,18 @@ impl BookingService {
             }
         };
 
+        // trilha de auditoria do pagamento (best-effort: não derruba o agendamento)
+        registrar_pagamento(
+            db,
+            &appointment,
+            pix.nome(),
+            &charge.txid,
+            PaymentStatus::Pending,
+            None,
+            None,
+        )
+        .await;
+
         let hold_expires = appointment.hold_expires_at.with_timezone(&Utc);
         Ok((appointment.id, charge, hold_expires))
     }
@@ -160,19 +175,108 @@ impl BookingService {
 
     /// Confirma pelo `txid` do Pix — caminho usado pelos webhooks do PSP.
     /// Idempotente: agendamento já confirmado retorna `true` sem efeito.
+    ///
+    /// Registra o pagamento em `payments`. Pagamento que chega com o hold já
+    /// vencido é marcado como `late_paid` (reconciliação) e retorna `false`.
     pub async fn confirmar_por_txid(
         db: &DatabaseConnection,
+        provider: &str,
         txid: &str,
+        raw_payload: Option<String>,
     ) -> Result<bool, BookingError> {
         let appt = AppointmentModel::find_by_txid(db, txid)
             .await?
             .ok_or(BookingError::AppointmentNotFound)?;
 
         match appt.status {
-            AppointmentStatus::Confirmed => Ok(true),
-            AppointmentStatus::Hold => AppointmentModel::confirm_payment(db, appt.id)
-                .await
-                .map_err(BookingError::Database),
+            AppointmentStatus::Confirmed => {
+                registrar_pagamento(
+                    db,
+                    &appt,
+                    provider,
+                    txid,
+                    PaymentStatus::Paid,
+                    appt.signal_paid_at.map(|dt| dt.with_timezone(&Utc)),
+                    raw_payload,
+                )
+                .await;
+                Ok(true)
+            }
+            AppointmentStatus::Hold => {
+                let confirmado = AppointmentModel::confirm_payment(db, appt.id)
+                    .await
+                    .map_err(BookingError::Database)?;
+                let agora = Utc::now();
+                if confirmado {
+                    registrar_pagamento(
+                        db,
+                        &appt,
+                        provider,
+                        txid,
+                        PaymentStatus::Paid,
+                        Some(agora),
+                        raw_payload,
+                    )
+                    .await;
+                    return Ok(true);
+                }
+
+                // falha na transição: pode ser corrida (outra entrega confirmou)
+                // ou hold realmente vencido — reconfere o estado atual
+                let atual = AppointmentModel::find_by_id(db, appt.id)
+                    .await?
+                    .ok_or(BookingError::AppointmentNotFound)?;
+                if atual.status == AppointmentStatus::Confirmed {
+                    registrar_pagamento(
+                        db,
+                        &atual,
+                        provider,
+                        txid,
+                        PaymentStatus::Paid,
+                        atual.signal_paid_at.map(|dt| dt.with_timezone(&Utc)),
+                        raw_payload,
+                    )
+                    .await;
+                    return Ok(true);
+                }
+
+                tracing::warn!(
+                    txid,
+                    appointment_id = %appt.id,
+                    "pagamento recebido com hold vencido — registrado para reconciliação"
+                );
+                registrar_pagamento(
+                    db,
+                    &atual,
+                    provider,
+                    txid,
+                    PaymentStatus::LatePaid,
+                    Some(agora),
+                    raw_payload,
+                )
+                .await;
+                Ok(false)
+            }
+            // pagamento chegou depois da expiração/cancelamento: reconciliação
+            AppointmentStatus::Expired | AppointmentStatus::Cancelled => {
+                tracing::warn!(
+                    txid,
+                    appointment_id = %appt.id,
+                    status = appt.status.as_str(),
+                    "pagamento recebido para agendamento já encerrado — registrado como late_paid"
+                );
+                registrar_pagamento(
+                    db,
+                    &appt,
+                    provider,
+                    txid,
+                    PaymentStatus::LatePaid,
+                    Some(Utc::now()),
+                    raw_payload,
+                )
+                .await;
+                Ok(false)
+            }
             _ => Err(BookingError::InvalidTransition),
         }
     }
@@ -185,6 +289,33 @@ impl BookingService {
         AppointmentModel::find_by_id_for_tenant(db, tenant_id, appointment_id)
             .await?
             .ok_or(BookingError::AppointmentNotFound)
+    }
+}
+
+/// Registra/atualiza a trilha de auditoria do pagamento em `payments`.
+/// Falha aqui nunca interrompe o fluxo de agendamento (apenas loga).
+async fn registrar_pagamento(
+    db: &DatabaseConnection,
+    appt: &appointments::Model,
+    provider: &str,
+    txid: &str,
+    status: PaymentStatus,
+    paid_at: Option<DateTime<Utc>>,
+    raw_payload: Option<String>,
+) {
+    let resultado = PaymentModel::registrar(
+        db,
+        appt.id,
+        provider,
+        txid,
+        appt.signal_amount_in_cents,
+        status,
+        paid_at,
+        raw_payload,
+    )
+    .await;
+    if let Err(e) = resultado {
+        tracing::warn!(txid, error = %e, "falha ao registrar pagamento em auditoria");
     }
 }
 

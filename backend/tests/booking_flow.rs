@@ -8,10 +8,12 @@ use migration::MigratorTrait;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use uuid::Uuid;
 
+use reservazap::models::_entities::payments::PaymentStatus;
 use reservazap::models::_entities::{
     appointments, professionals, services, tenants, working_hours,
 };
 use reservazap::models::appointments::AppointmentModel;
+use reservazap::models::payments::PaymentModel;
 use reservazap::services::availability;
 use reservazap::services::booking::{BookingError, BookingService};
 use reservazap::services::pix_provider::MockPixProvider;
@@ -197,11 +199,11 @@ async fn fluxo_completo_intent_webhook_confirmacao() {
     assert_eq!(appt.status.as_str(), "hold");
 
     // webhook de pagamento (idempotente)
-    let confirmado = BookingService::confirmar_por_txid(&db, &charge.txid)
+    let confirmado = BookingService::confirmar_por_txid(&db, "mock", &charge.txid, None)
         .await
         .unwrap();
     assert!(confirmado);
-    let de_novo = BookingService::confirmar_por_txid(&db, &charge.txid)
+    let de_novo = BookingService::confirmar_por_txid(&db, "mock", &charge.txid, None)
         .await
         .unwrap();
     assert!(de_novo);
@@ -211,6 +213,99 @@ async fn fluxo_completo_intent_webhook_confirmacao() {
         .unwrap();
     assert_eq!(status.status.as_str(), "confirmed");
     assert!(status.signal_paid_at.is_some());
+
+    // trilha de auditoria do pagamento
+    let pagamentos = PaymentModel::registrar(
+        &db,
+        appointment_id,
+        "mock",
+        &charge.txid,
+        charge.valor_centavos,
+        PaymentStatus::Paid,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(pagamentos.status.as_str(), "paid");
+
+    limpar_fixture(&db, f.tenant_id).await;
+}
+
+#[tokio::test]
+async fn pagamento_tardio_e_registrado_como_late_paid() {
+    let db = db().await;
+    let f = criar_fixture(&db).await;
+    let starts_at = futuro_em(420);
+
+    let (appointment_id, charge, _) = criar_intencao(&db, &f, starts_at).await.unwrap();
+
+    // simula vencimento do hold
+    let vencido = (Utc::now() - Duration::minutes(5)).fixed_offset();
+    appointments::Entity::update_many()
+        .set(appointments::ActiveModel {
+            hold_expires_at: Set(vencido),
+            ..Default::default()
+        })
+        .filter(appointments::Column::Id.eq(appointment_id))
+        .exec(&db)
+        .await
+        .unwrap();
+
+    let confirmado = BookingService::confirmar_por_txid(&db, "mock", &charge.txid, None)
+        .await
+        .unwrap();
+    assert!(!confirmado);
+
+    let pagamento = PaymentModel::registrar(
+        &db,
+        appointment_id,
+        "mock",
+        &charge.txid,
+        charge.valor_centavos,
+        PaymentStatus::LatePaid,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(pagamento.status.as_str(), "late_paid");
+
+    limpar_fixture(&db, f.tenant_id).await;
+}
+
+#[tokio::test]
+async fn pagamento_apos_expiracao_do_sweeper_vira_late_paid() {
+    let db = db().await;
+    let f = criar_fixture(&db).await;
+    let starts_at = futuro_em(480);
+
+    let (appointment_id, charge, _) = criar_intencao(&db, &f, starts_at).await.unwrap();
+
+    // sweeper já expirou o hold antes do pagamento chegar
+    AppointmentModel::mark_expired(&db, appointment_id)
+        .await
+        .unwrap();
+
+    let confirmado = BookingService::confirmar_por_txid(&db, "mock", &charge.txid, None)
+        .await
+        .unwrap();
+    assert!(!confirmado);
+
+    // a trilha de auditoria registra o pagamento tardio
+    let pagamento = PaymentModel::registrar(
+        &db,
+        appointment_id,
+        "mock",
+        &charge.txid,
+        charge.valor_centavos,
+        PaymentStatus::LatePaid,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(pagamento.status.as_str(), "late_paid");
 
     limpar_fixture(&db, f.tenant_id).await;
 }
@@ -316,7 +411,7 @@ async fn hold_vencido_nao_confirma_e_expira() {
         .await
         .unwrap();
 
-    let confirmado = BookingService::confirmar_por_txid(&db, &charge.txid)
+    let confirmado = BookingService::confirmar_por_txid(&db, "mock", &charge.txid, None)
         .await
         .unwrap();
     assert!(!confirmado);
@@ -350,7 +445,7 @@ async fn disponibilidade_bloqueia_horario_agendado() {
     // agenda um horário e confirma — precisa estar dentro do expediente (00-23h)
     let (appointment_id, charge, _) = criar_intencao(&db, &f, hora_fixa).await.unwrap();
     assert!(
-        BookingService::confirmar_por_txid(&db, &charge.txid)
+        BookingService::confirmar_por_txid(&db, "mock", &charge.txid, None)
             .await
             .unwrap()
     );
