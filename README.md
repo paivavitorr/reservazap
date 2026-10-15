@@ -81,11 +81,11 @@ Copie `.env.example` e ajuste. As principais:
 ## Produção
 
 ```bash
-# gera o segredo do JWT e preencha o .env
-openssl rand -base64 48
+# gera o segredo do JWT e preencha o .env (obrigatório)
+echo "JWT_SECRET=$(openssl rand -base64 48)" >> .env
 
 # stack completa (postgres + backend + frontend)
-docker compose --profile full up --build
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build
 ```
 
 - Backend: `http://localhost:3000` (healthcheck em `/_ping`)
