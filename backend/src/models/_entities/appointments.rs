@@ -72,6 +72,8 @@ pub struct Model {
     pub hold_expires_at: DateTimeWithTimeZone,
     pub cancelled_at: Option<DateTimeWithTimeZone>,
     pub cancellation_reason: Option<String>,
+    pub reminded_24h_at: Option<DateTimeWithTimeZone>,
+    pub reminded_1h_at: Option<DateTimeWithTimeZone>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
 }

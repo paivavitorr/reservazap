@@ -21,7 +21,8 @@ reservazap/
 - **Backend:** Rust, Loco.rs (axum), SeaORM, PostgreSQL 16, Tokio
 - **Frontend:** Nuxt 3, Vue 3 (Composition API), Pinia, Tailwind CSS v4
 - **Infra:** Docker Compose
-- **Pagamento:** Pix (provider trait — mock em dev, PSP real em prod)
+- **Pagamento:** Pix (provider trait — mock em dev, Mercado Pago em prod via `PIX_PROVIDER`)
+- **Notificações:** WhatsApp (provider trait — Evolution API via `NOTIFICATION_PROVIDER`, mock em dev)
 
 ## Comandos
 

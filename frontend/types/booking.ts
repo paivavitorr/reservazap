@@ -2,6 +2,7 @@ export interface Tenant {
   id: string
   name: string
   slug: string
+  phone: string
   timezone: string
   booking_hold_minutes: number
 }

@@ -44,6 +44,7 @@ impl Hooks for App {
 
     fn register_tasks(tasks: &mut Tasks) {
         tasks.register(tasks::expire_holds::ExpireHolds);
+        tasks.register(tasks::send_reminders::SendReminders);
     }
 
     async fn truncate(_ctx: &AppContext) -> Result<()> {

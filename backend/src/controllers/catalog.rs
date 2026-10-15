@@ -19,6 +19,7 @@ pub struct TenantInfo {
     pub id: Uuid,
     pub name: String,
     pub slug: String,
+    pub phone: String,
     pub timezone: String,
     pub booking_hold_minutes: i32,
 }
@@ -55,6 +56,7 @@ async fn get_catalog(
             id: tenant.id,
             name: tenant.name,
             slug: tenant.slug,
+            phone: tenant.phone,
             timezone: tenant.timezone,
             booking_hold_minutes: tenant.booking_hold_minutes,
         },

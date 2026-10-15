@@ -35,3 +35,7 @@ scheduler:
       run: "expire_holds"
       schedule: "0 */1 * * * *"
       tags: ["maintenance"]
+    send_reminders:
+      run: "send_reminders"
+      schedule: "0 */5 * * * *"
+      tags: ["notifications"]

@@ -16,6 +16,7 @@ use reservazap::models::appointments::AppointmentModel;
 use reservazap::models::payments::PaymentModel;
 use reservazap::services::availability;
 use reservazap::services::booking::{BookingError, BookingService};
+use reservazap::services::notifications::{self, MockNotificationProvider};
 use reservazap::services::pix_provider::MockPixProvider;
 
 const DSN_DEV: &str = "postgres://postgres:postgres@localhost:5433/reservazap";
@@ -496,4 +497,38 @@ async fn status_de_outro_tenant_nao_vaza() {
 
     limpar_fixture(&db, f_a.tenant_id).await;
     limpar_fixture(&db, f_b.tenant_id).await;
+}
+
+#[tokio::test]
+async fn lembretes_sao_enviados_uma_unica_vez() {
+    let db = db().await;
+    let f = criar_fixture(&db).await;
+
+    // horário exatamente 24h à frente (dentro da janela do lembrete)
+    let agora = Utc::now();
+    let em_24h = agora + Duration::hours(24);
+    let (appointment_id, charge, _) = criar_intencao(&db, &f, em_24h).await.unwrap();
+    assert!(
+        BookingService::confirmar_por_txid(&db, "mock", &charge.txid, None)
+            .await
+            .unwrap()
+    );
+
+    let provider: std::sync::Arc<dyn reservazap::services::notifications::NotificationProvider> =
+        std::sync::Arc::new(MockNotificationProvider);
+
+    let enviados = notifications::enviar_lembretes_pendentes(&db, &provider, agora).await;
+    assert_eq!(enviados, 1, "deve enviar o lembrete de 24h");
+
+    // idempotência: segunda passada não envia de novo
+    let enviados_depois = notifications::enviar_lembretes_pendentes(&db, &provider, agora).await;
+    assert_eq!(enviados_depois, 0);
+
+    let appt = AppointmentModel::find_by_id(&db, appointment_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(appt.reminded_24h_at.is_some());
+
+    limpar_fixture(&db, f.tenant_id).await;
 }

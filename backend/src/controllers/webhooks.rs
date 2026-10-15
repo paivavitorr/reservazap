@@ -5,8 +5,10 @@ use loco_rs::prelude::*;
 use serde::Deserialize;
 use std::collections::HashMap;
 
+use crate::models::appointments::AppointmentModel;
 use crate::models::payments::PaymentModel;
 use crate::services::booking::{BookingError, BookingService};
+use crate::services::notifications;
 use crate::services::pix_provider::{self, PixStatus};
 
 #[derive(Debug, Deserialize, serde::Serialize)]
@@ -49,6 +51,7 @@ async fn pix_webhook(
                     appointment_status: Some("late_paid".to_string()),
                 }));
             }
+            notificar_confirmacao(&ctx.db, &payload.txid).await;
             Ok(Json(WebhookResponse {
                 ok: true,
                 appointment_status: Some("confirmed".to_string()),
@@ -130,6 +133,9 @@ async fn mercado_pago_webhook(
             )
             .await
             .map_err(map_webhook_error)?;
+            if confirmado {
+                notificar_confirmacao(&ctx.db, &txid).await;
+            }
             Ok(Json(WebhookResponse {
                 ok: confirmado,
                 appointment_status: Some(if confirmado {
@@ -172,6 +178,25 @@ async fn mercado_pago_webhook(
             ok: true,
             appointment_status: None,
         })),
+    }
+}
+
+/// Notifica o cliente sobre a confirmação (best-effort).
+async fn notificar_confirmacao(ctx_db: &sea_orm::DatabaseConnection, txid: &str) {
+    match AppointmentModel::find_by_txid(ctx_db, txid).await {
+        Ok(Some(appt)) => {
+            let provider = notifications::from_env();
+            notifications::notificar_confirmacao(ctx_db, &appt, &provider).await;
+        }
+        Ok(None) => {
+            tracing::warn!(
+                txid,
+                "agendamento não encontrado para notificação de confirmação"
+            );
+        }
+        Err(e) => {
+            tracing::warn!(txid, error = %e, "falha ao buscar agendamento para notificação");
+        }
     }
 }
 

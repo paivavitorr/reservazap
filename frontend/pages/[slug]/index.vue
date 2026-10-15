@@ -74,6 +74,31 @@ function reiniciar() {
   store.reset()
   store.fetchCatalog(slug)
 }
+
+const linkWhats = computed(() => {
+  if (!store.catalog) return ''
+  const digitos = store.catalog.tenant.phone?.replace(/\D/g, '')
+  if (!digitos) return ''
+  // 10-11 dígitos é número local (DD+numero); 12-13 já incluem o DDI 55
+  const telefone = digitos.length <= 11 ? `55${digitos}` : digitos
+  const texto = encodeURIComponent(
+    `Olá! Confirmei meu agendamento na ${store.catalog.tenant.name} pelo ReservaZap.`
+  )
+  return `https://wa.me/${telefone}?text=${texto}`
+})
+
+function baixarCalendario() {
+  if (!store.catalog || !store.selectedService || !store.selectedSlot) return
+  const ics = gerarIcs({
+    uid: store.hold?.appointment_id ?? store.selectedSlot.starts_at,
+    titulo: `${store.selectedService.name} · ${store.catalog.tenant.name}`,
+    descricao: `Agendamento confirmado via ReservaZap. Profissional: ${store.selectedProfessional?.name ?? ''}.`,
+    local: store.catalog.tenant.name,
+    inicioUtc: store.selectedSlot.starts_at,
+    duracaoMinutos: store.selectedService.duration_minutes,
+  })
+  baixarArquivo('agendamento.ics', ics)
+}
 </script>
 
 <template>
@@ -212,6 +237,24 @@ function reiniciar() {
             <p class="mt-2 text-sm text-ink/60">
               Seu horário está garantido. Você receberá os detalhes no WhatsApp.
             </p>
+            <div class="mt-6 grid gap-2.5">
+              <button
+                type="button"
+                class="rounded-lg bg-brand px-5 py-3 font-semibold text-white transition-colors hover:bg-brand-dark"
+                @click="baixarCalendario"
+              >
+                Adicionar ao calendário
+              </button>
+              <a
+                v-if="linkWhats"
+                :href="linkWhats"
+                target="_blank"
+                rel="noopener"
+                class="rounded-lg border border-brand px-5 py-3 font-semibold text-brand transition-colors hover:bg-brand-soft"
+              >
+                Falar no WhatsApp
+              </a>
+            </div>
           </div>
         </template>
 

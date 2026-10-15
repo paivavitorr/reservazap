@@ -1,4 +1,5 @@
 use crate::models::appointments::AppointmentModel;
+use crate::services::notifications;
 use loco_rs::prelude::*;
 
 pub struct ExpireHolds;
@@ -21,15 +22,23 @@ impl Task for ExpireHolds {
             return Ok(());
         }
 
+        let provider = notifications::from_env();
         let count = expired.len();
         for appt in expired {
             match AppointmentModel::mark_expired(db, appt.id).await {
-                Ok(()) => {
+                Ok(true) => {
+                    notifications::notificar_horario_liberado(db, &appt, &provider).await;
                     tracing::info!(
                         appointment_id = %appt.id,
                         professional_id = %appt.professional_id,
                         starts_at = %appt.starts_at,
                         "hold expirado, horário liberado"
+                    );
+                }
+                Ok(false) => {
+                    tracing::debug!(
+                        appointment_id = %appt.id,
+                        "hold não expirado (transição concorrente)"
                     );
                 }
                 Err(e) => {

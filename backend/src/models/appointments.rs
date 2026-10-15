@@ -4,6 +4,12 @@ use uuid::Uuid;
 
 use super::_entities::appointments::{self, AppointmentStatus, Entity as Appointment};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lembrete {
+    VinteQuatroHoras,
+    UmaHora,
+}
+
 pub struct AppointmentModel;
 
 impl AppointmentModel {
@@ -103,6 +109,8 @@ impl AppointmentModel {
             hold_expires_at: Set(hold_expires),
             cancelled_at: Set(None),
             cancellation_reason: Set(None),
+            reminded_24h_at: Set(None),
+            reminded_1h_at: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
         };
@@ -111,10 +119,11 @@ impl AppointmentModel {
     }
 
     /// Marca um hold vencido como `expired`. Só afeta linhas ainda em `hold`,
-    /// então uma confirmação concorrente nunca é sobrescrita.
-    pub async fn mark_expired(db: &DatabaseConnection, id: Uuid) -> Result<(), sea_orm::DbErr> {
+    /// então uma confirmação concorrente nunca é sobrescrita. Retorna `false`
+    /// quando nada foi expirado (ex.: confirmação chegou primeiro).
+    pub async fn mark_expired(db: &DatabaseConnection, id: Uuid) -> Result<bool, sea_orm::DbErr> {
         let now = Utc::now().fixed_offset();
-        Appointment::update_many()
+        let res = Appointment::update_many()
             .set(appointments::ActiveModel {
                 status: Set(AppointmentStatus::Expired),
                 updated_at: Set(now),
@@ -122,6 +131,50 @@ impl AppointmentModel {
             })
             .filter(appointments::Column::Id.eq(id))
             .filter(appointments::Column::Status.eq(AppointmentStatus::Hold))
+            .exec(db)
+            .await?;
+        Ok(res.rows_affected == 1)
+    }
+
+    /// Agendamentos confirmados que ainda não receberam o lembrete do tipo
+    /// informado e cujo início está dentro da janela `[inicio, fim)`.
+    pub async fn find_aguardando_lembrete(
+        db: &DatabaseConnection,
+        tipo: Lembrete,
+        inicio: chrono::DateTime<Utc>,
+        fim: chrono::DateTime<Utc>,
+    ) -> Result<Vec<appointments::Model>, sea_orm::DbErr> {
+        let coluna = match tipo {
+            Lembrete::VinteQuatroHoras => appointments::Column::Reminded24hAt,
+            Lembrete::UmaHora => appointments::Column::Reminded1hAt,
+        };
+        Appointment::find()
+            .filter(appointments::Column::Status.eq(AppointmentStatus::Confirmed))
+            .filter(appointments::Column::StartsAt.gte(inicio.fixed_offset()))
+            .filter(appointments::Column::StartsAt.lt(fim.fixed_offset()))
+            .filter(coluna.is_null())
+            .all(db)
+            .await
+    }
+
+    /// Marca o lembrete como enviado (idempotente por agendamento).
+    pub async fn marcar_lembrete(
+        db: &DatabaseConnection,
+        id: Uuid,
+        tipo: Lembrete,
+    ) -> Result<(), sea_orm::DbErr> {
+        let now = Utc::now().fixed_offset();
+        let mut active = appointments::ActiveModel {
+            updated_at: Set(now),
+            ..Default::default()
+        };
+        match tipo {
+            Lembrete::VinteQuatroHoras => active.reminded_24h_at = Set(Some(now)),
+            Lembrete::UmaHora => active.reminded_1h_at = Set(Some(now)),
+        }
+        Appointment::update_many()
+            .set(active)
+            .filter(appointments::Column::Id.eq(id))
             .exec(db)
             .await?;
         Ok(())
