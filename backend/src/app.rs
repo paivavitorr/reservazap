@@ -33,8 +33,10 @@ impl Hooks for App {
     fn routes(_ctx: &AppContext) -> AppRoutes {
         AppRoutes::with_default_routes()
             .prefix("api")
+            .add_route(controllers::auth::routes())
             .add_route(controllers::bookings::routes())
             .add_route(controllers::catalog::routes())
+            .add_route(controllers::painel::routes())
             .add_route(controllers::webhooks::routes())
     }
 

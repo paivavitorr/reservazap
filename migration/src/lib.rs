@@ -9,6 +9,7 @@ mod m20261009_000004_create_appointments;
 mod m20261015_000005_create_working_hours;
 mod m20261015_000006_create_payments;
 mod m20261015_000007_add_reminder_columns;
+mod m20261016_000008_create_users;
 
 pub struct Migrator;
 
@@ -23,6 +24,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261015_000005_create_working_hours::Migration),
             Box::new(m20261015_000006_create_payments::Migration),
             Box::new(m20261015_000007_add_reminder_columns::Migration),
+            Box::new(m20261016_000008_create_users::Migration),
         ]
     }
 }

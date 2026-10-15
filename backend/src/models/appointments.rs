@@ -1,5 +1,7 @@
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
+};
 use uuid::Uuid;
 
 use super::_entities::appointments::{self, AppointmentStatus, Entity as Appointment};
@@ -59,6 +61,40 @@ impl AppointmentModel {
             .filter(appointments::Column::EndsAt.gt(starts_at.fixed_offset()))
             .all(db)
             .await
+    }
+
+    /// Agendamentos do tenant com início em `[de, ate)` — agenda do painel.
+    pub async fn find_by_tenant_range(
+        db: &DatabaseConnection,
+        tenant_id: Uuid,
+        de: chrono::DateTime<chrono::FixedOffset>,
+        ate: chrono::DateTime<chrono::FixedOffset>,
+    ) -> Result<Vec<appointments::Model>, sea_orm::DbErr> {
+        Appointment::find()
+            .filter(appointments::Column::TenantId.eq(tenant_id))
+            .filter(appointments::Column::StartsAt.gte(de))
+            .filter(appointments::Column::StartsAt.lt(ate))
+            .order_by_asc(appointments::Column::StartsAt)
+            .all(db)
+            .await
+    }
+
+    /// Soma dos sinais pagos desde uma data (pelo momento do pagamento).
+    pub async fn somar_sinais_pagos_desde(
+        db: &DatabaseConnection,
+        tenant_id: Uuid,
+        desde: chrono::DateTime<chrono::FixedOffset>,
+    ) -> Result<i64, sea_orm::DbErr> {
+        use sea_orm::QuerySelect;
+        let valor: Option<i64> = Appointment::find()
+            .select_only()
+            .column_as(appointments::Column::SignalAmountInCents.sum(), "total")
+            .filter(appointments::Column::TenantId.eq(tenant_id))
+            .filter(appointments::Column::SignalPaidAt.gte(desde))
+            .into_tuple()
+            .one(db)
+            .await?;
+        Ok(valor.unwrap_or(0))
     }
 
     pub async fn find_expired_holds(
@@ -178,6 +214,51 @@ impl AppointmentModel {
             .exec(db)
             .await?;
         Ok(())
+    }
+
+    /// Transição de status validada pela máquina de estados e atômica
+    /// (`WHERE status = atual`). Retorna:
+    /// - `None` quando o agendamento não existe no tenant;
+    /// - `Some(false)` para transição inválida ou corrida perdida;
+    /// - `Some(true)` quando a transição foi aplicada.
+    pub async fn transicionar(
+        db: &DatabaseConnection,
+        id: Uuid,
+        tenant_id: Uuid,
+        proximo: AppointmentStatus,
+        motivo: Option<&str>,
+    ) -> Result<Option<bool>, sea_orm::DbErr> {
+        let atual = match Appointment::find_by_id(id)
+            .filter(appointments::Column::TenantId.eq(tenant_id))
+            .one(db)
+            .await?
+        {
+            Some(m) => m,
+            None => return Ok(None),
+        };
+
+        if !atual.status.can_transition_to(&proximo) {
+            return Ok(Some(false));
+        }
+
+        let now = Utc::now().fixed_offset();
+        let mut active = appointments::ActiveModel {
+            status: Set(proximo.clone()),
+            updated_at: Set(now),
+            ..Default::default()
+        };
+        if proximo == AppointmentStatus::Cancelled {
+            active.cancelled_at = Set(Some(now));
+            active.cancellation_reason = Set(motivo.map(|m| m.to_string()));
+        }
+
+        let res = Appointment::update_many()
+            .set(active)
+            .filter(appointments::Column::Id.eq(id))
+            .filter(appointments::Column::Status.eq(atual.status))
+            .exec(db)
+            .await?;
+        Ok(Some(res.rows_affected == 1))
     }
 
     /// Confirma o pagamento do sinal de forma atômica: `hold` → `confirmed`

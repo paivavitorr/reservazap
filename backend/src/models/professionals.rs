@@ -5,6 +5,18 @@ use uuid::Uuid;
 pub struct ProfessionalModel;
 
 impl ProfessionalModel {
+    /// Inclui profissionais desativados (uso no painel administrativo).
+    pub async fn find_by_tenant_all(
+        db: &DatabaseConnection,
+        tenant_id: Uuid,
+    ) -> Result<Vec<professionals::Model>, sea_orm::DbErr> {
+        Professional::find()
+            .filter(professionals::Column::TenantId.eq(tenant_id))
+            .order_by_asc(professionals::Column::Name)
+            .all(db)
+            .await
+    }
+
     pub async fn find_by_id_for_tenant(
         db: &DatabaseConnection,
         tenant_id: Uuid,

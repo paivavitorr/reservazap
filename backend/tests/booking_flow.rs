@@ -532,3 +532,90 @@ async fn lembretes_sao_enviados_uma_unica_vez() {
 
     limpar_fixture(&db, f.tenant_id).await;
 }
+
+#[tokio::test]
+async fn transicoes_de_status_do_painel_sao_validadas() {
+    let db = db().await;
+    let f = criar_fixture(&db).await;
+    let starts_at = futuro_em(240);
+
+    let (appointment_id, charge, _) = criar_intencao(&db, &f, starts_at).await.unwrap();
+    assert!(
+        BookingService::confirmar_por_txid(&db, "mock", &charge.txid, None)
+            .await
+            .unwrap()
+    );
+
+    // confirmado → concluir é permitido
+    let r = AppointmentModel::transicionar(
+        &db,
+        appointment_id,
+        f.tenant_id,
+        appointments::AppointmentStatus::Completed,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(r, Some(true));
+
+    // concluído → cancelar não é permitido
+    let r = AppointmentModel::transicionar(
+        &db,
+        appointment_id,
+        f.tenant_id,
+        appointments::AppointmentStatus::Cancelled,
+        Some("desisti"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(r, Some(false));
+
+    // agendamento de outro tenant não é encontrado
+    let f_b = criar_fixture(&db).await;
+    let r = AppointmentModel::transicionar(
+        &db,
+        appointment_id,
+        f_b.tenant_id,
+        appointments::AppointmentStatus::Cancelled,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(r, None);
+
+    limpar_fixture(&db, f.tenant_id).await;
+    limpar_fixture(&db, f_b.tenant_id).await;
+}
+
+#[tokio::test]
+async fn cancelamento_registra_motivo_e_data() {
+    let db = db().await;
+    let f = criar_fixture(&db).await;
+    let starts_at = futuro_em(180);
+
+    let (appointment_id, _, _) = criar_intencao(&db, &f, starts_at).await.unwrap();
+
+    let r = AppointmentModel::transicionar(
+        &db,
+        appointment_id,
+        f.tenant_id,
+        appointments::AppointmentStatus::Cancelled,
+        Some("cliente desistiu"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(r, Some(true));
+
+    let appt = AppointmentModel::find_by_id(&db, appointment_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(appt.status.as_str(), "cancelled");
+    assert_eq!(
+        appt.cancellation_reason.as_deref(),
+        Some("cliente desistiu")
+    );
+    assert!(appt.cancelled_at.is_some());
+
+    limpar_fixture(&db, f.tenant_id).await;
+}

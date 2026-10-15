@@ -4,6 +4,12 @@ logger:
   level: debug
   format: pretty
 
+auth:
+  # HS512 — o secret é interpretado como base64 pelo Loco
+  jwt:
+    secret: a2jPy6BwXjaREogBrF7hqg1yHyTKgJfIL2Iqxqnq7VM=
+    expiration: 604800
+
 server:
   port: 3000
   host: http://localhost

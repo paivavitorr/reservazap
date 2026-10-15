@@ -18,6 +18,8 @@ export default defineNuxtConfig({
     '/api/**': {
       proxy: `${process.env.NUXT_API_PROXY_TARGET || 'http://127.0.0.1:3000'}/api/**`,
     },
+    // painel roda como SPA (autenticação por cookie/token no cliente)
+    '/painel/**': { ssr: false },
   },
 
   app: {
