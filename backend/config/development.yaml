@@ -9,6 +9,12 @@ server:
   host: http://localhost
   binding: 0.0.0.0
   expose_request_id: true
+  middlewares:
+    cors:
+      enable: true
+      allow_origins: ["*"]
+      allow_headers: ["*"]
+      allow_methods: ["*"]
 
 database:
   uri: postgres://postgres:postgres@localhost:5433/reservazap
@@ -27,5 +33,5 @@ scheduler:
   jobs:
     expire_holds:
       run: "expire_holds"
-      schedule: "*/1 * * * *"
+      schedule: "0 */1 * * * *"
       tags: ["maintenance"]

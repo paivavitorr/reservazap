@@ -26,11 +26,17 @@ reservazap/
 ## Comandos
 
 ```bash
-make db-up          # Subir PostgreSQL via Docker
-make be-run         # Rodar backend (cargo loco start)
+make db-up          # Subir PostgreSQL via Docker (localhost:5433)
+make be-run         # Rodar backend com scheduler (cargo loco start --scheduler)
 make be-migrate     # Rodar migrations
+make be-seed        # Popular demo (barbearia-do-zeu)
+make be-test        # Testes do backend (requer Postgres ativo)
+make be-lint        # fmt + clippy
 make fe-install     # Instalar deps do frontend
-make fe-dev         # Rodar frontend em dev
+make fe-dev         # Rodar frontend em dev (localhost:3001)
+make fe-typecheck   # Typecheck do frontend
+make fe-test        # Testes do frontend
+make dev            # Sobe o Postgres e mostra os próximos passos
 ```
 
 ## Convenções
@@ -38,3 +44,6 @@ make fe-dev         # Rodar frontend em dev
 - Código em **português** (nomes de variáveis, comentários, commits)
 - Multi-tenant via slug na URL pública (`/{slug}`)
 - Agendamentos com hold de 10min via background task (expiração automática)
+- Backend em `localhost:3000` (`/api/...`); frontend em `localhost:3001` com proxy `/api` (Nuxt dev) e CORS habilitado no backend
+- Horários trafegam em UTC (ISO-8601); exibição no fuso do tenant (`tenants.timezone`)
+- Dados de demo: slug `barbearia-do-zeu` criado por `make be-seed`
