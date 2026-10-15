@@ -132,7 +132,14 @@ pub struct MercadoPagoPixProvider {
 
 fn http_client() -> reqwest::Client {
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-    CLIENT.get_or_init(reqwest::Client::new).clone()
+    CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .unwrap_or_default()
+        })
+        .clone()
 }
 
 impl MercadoPagoPixProvider {
