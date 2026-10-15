@@ -79,6 +79,43 @@ impl AppointmentModel {
             .await
     }
 
+    /// Agendamentos de um cliente pelo telefone (LGPD: exportação de dados).
+    pub async fn find_por_telefone(
+        db: &DatabaseConnection,
+        tenant_id: Uuid,
+        telefone: &str,
+    ) -> Result<Vec<appointments::Model>, sea_orm::DbErr> {
+        Appointment::find()
+            .filter(appointments::Column::TenantId.eq(tenant_id))
+            .filter(appointments::Column::ClientPhone.eq(telefone))
+            .order_by_asc(appointments::Column::StartsAt)
+            .all(db)
+            .await
+    }
+
+    /// Anonimiza os dados pessoais de um cliente (LGPD). Retorna quantos
+    /// registros foram alterados.
+    pub async fn anonimizar_cliente(
+        db: &DatabaseConnection,
+        tenant_id: Uuid,
+        telefone: &str,
+    ) -> Result<u64, sea_orm::DbErr> {
+        let now = Utc::now().fixed_offset();
+        let res = Appointment::update_many()
+            .set(appointments::ActiveModel {
+                client_name: Set("Cliente removido".to_string()),
+                client_phone: Set("00000000000".to_string()),
+                client_email: Set(None),
+                updated_at: Set(now),
+                ..Default::default()
+            })
+            .filter(appointments::Column::TenantId.eq(tenant_id))
+            .filter(appointments::Column::ClientPhone.eq(telefone))
+            .exec(db)
+            .await?;
+        Ok(res.rows_affected)
+    }
+
     /// Soma dos sinais pagos desde uma data (pelo momento do pagamento).
     pub async fn somar_sinais_pagos_desde(
         db: &DatabaseConnection,

@@ -47,6 +47,11 @@ pub struct CancelarPayload {
     pub reason: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ClientePayload {
+    pub phone: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct ServicoInfo {
     pub id: Uuid,
@@ -585,6 +590,54 @@ async fn resumo(State(ctx): State<AppContext>, auth: auth::JWT) -> Result<Json<R
     }))
 }
 
+/// Exportação de dados pessoais de um cliente (LGPD — direito de acesso).
+async fn exportar_cliente(
+    State(ctx): State<AppContext>,
+    auth: auth::JWT,
+    Query(query): Query<ClientePayload>,
+) -> Result<Json<serde_json::Value>> {
+    let user = usuario_do_token(&ctx, &auth).await?;
+    let telefone = digitos(&query.phone);
+    if telefone.len() < 10 {
+        return Err(Error::BadRequest("telefone inválido".into()));
+    }
+    let itens = AppointmentModel::find_por_telefone(&ctx.db, user.tenant_id, &telefone).await?;
+    Ok(Json(serde_json::json!({
+        "phone": telefone,
+        "appointments": itens.into_iter().map(|a| serde_json::json!({
+            "starts_at": a.starts_at.with_timezone(&Utc),
+            "ends_at": a.ends_at.with_timezone(&Utc),
+            "client_name": a.client_name,
+            "client_email": a.client_email,
+            "status": a.status.as_str(),
+            "signal_amount_in_cents": a.signal_amount_in_cents,
+            "signal_paid_at": a.signal_paid_at.map(|dt| dt.with_timezone(&Utc)),
+        })).collect::<Vec<_>>(),
+    })))
+}
+
+/// Anonimiza os dados pessoais de um cliente (LGPD — direito ao esquecimento).
+async fn anonimizar_cliente(
+    State(ctx): State<AppContext>,
+    auth: auth::JWT,
+    Json(payload): Json<ClientePayload>,
+) -> Result<Json<serde_json::Value>> {
+    let user = usuario_do_token(&ctx, &auth).await?;
+    let telefone = digitos(&payload.phone);
+    if telefone.len() < 10 {
+        return Err(Error::BadRequest("telefone inválido".into()));
+    }
+    let alterados =
+        AppointmentModel::anonimizar_cliente(&ctx.db, user.tenant_id, &telefone).await?;
+    Ok(Json(
+        serde_json::json!({ "ok": true, "alterados": alterados }),
+    ))
+}
+
+fn digitos(raw: &str) -> String {
+    raw.chars().filter(|c| c.is_ascii_digit()).collect()
+}
+
 fn parse_data(raw: Option<&str>, mais_dias: i64) -> Result<chrono::DateTime<chrono::FixedOffset>> {
     match raw {
         Some(s) => chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
@@ -633,4 +686,6 @@ pub fn routes() -> Routes {
         .add("/agendamentos/{id}/concluir", post(concluir_agendamento))
         .add("/agendamentos/{id}/no-show", post(no_show_agendamento))
         .add("/resumo", get(resumo))
+        .add("/clientes/dados", get(exportar_cliente))
+        .add("/clientes/anonimizar", post(anonimizar_cliente))
 }

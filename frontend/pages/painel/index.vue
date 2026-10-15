@@ -35,6 +35,43 @@ function dataLocal(d: Date): string {
   return `${ano}-${mes}-${dia}`
 }
 
+const telefoneLgpd = ref('')
+const lgpdMsg = ref('')
+
+async function exportarCliente() {
+  lgpdMsg.value = ''
+  try {
+    const dados = await api<Record<string, unknown>>('/painel/clientes/dados', {
+      query: { phone: telefoneLgpd.value },
+    })
+    const blob = new Blob([JSON.stringify(dados, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `dados-cliente-${telefoneLgpd.value.replace(/\D/g, '')}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+    lgpdMsg.value = 'Dados exportados.'
+  } catch {
+    lgpdMsg.value = 'Não foi possível exportar os dados.'
+  }
+}
+
+async function anonimizarCliente() {
+  if (!window.confirm(`Anonimizar todos os dados do cliente ${telefoneLgpd.value}? Essa ação não pode ser desfeita.`)) return
+  lgpdMsg.value = ''
+  try {
+    const r = await api<{ alterados: number }>('/painel/clientes/anonimizar', {
+      method: 'POST',
+      body: { phone: telefoneLgpd.value },
+    })
+    lgpdMsg.value = `${r.alterados} agendamento(s) anonimizado(s).`
+    telefoneLgpd.value = ''
+  } catch {
+    lgpdMsg.value = 'Não foi possível anonimizar os dados.'
+  }
+}
+
 const cards = computed(() => [
   { rotulo: 'Atendimentos hoje', valor: resumo.value?.hoje ?? '—' },
   { rotulo: 'Confirmados hoje', valor: resumo.value?.confirmados_hoje ?? '—' },
@@ -99,6 +136,36 @@ const cards = computed(() => [
           </span>
         </li>
       </ul>
+    </section>
+
+    <section class="mt-8">
+      <h2 class="font-display text-lg font-semibold">Privacidade (LGPD)</h2>
+      <p class="mt-1 text-sm text-ink/60">
+        Exportação e anonimização de dados pessoais de clientes por WhatsApp.
+      </p>
+      <div class="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-ink/10 bg-white px-4 py-3">
+        <input
+          v-model="telefoneLgpd"
+          type="tel"
+          placeholder="WhatsApp do cliente"
+          class="rounded-lg border border-ink/15 px-3 py-2.5"
+        >
+        <button
+          type="button"
+          class="rounded-lg border border-brand px-4 py-2.5 text-sm font-semibold text-brand hover:bg-brand-soft"
+          @click="exportarCliente"
+        >
+          Exportar dados
+        </button>
+        <button
+          type="button"
+          class="rounded-lg border border-danger px-4 py-2.5 text-sm font-semibold text-danger hover:bg-danger/10"
+          @click="anonimizarCliente"
+        >
+          Anonimizar
+        </button>
+        <p v-if="lgpdMsg" class="text-sm text-ink/60">{{ lgpdMsg }}</p>
+      </div>
     </section>
   </div>
 </template>

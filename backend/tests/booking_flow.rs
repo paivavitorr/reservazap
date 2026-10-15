@@ -619,3 +619,24 @@ async fn cancelamento_registra_motivo_e_data() {
 
     limpar_fixture(&db, f.tenant_id).await;
 }
+
+#[tokio::test]
+async fn lgpd_anonimiza_dados_do_cliente() {
+    let db = db().await;
+    let f = criar_fixture(&db).await;
+    let starts_at = futuro_em(120);
+
+    let (appointment_id, _, _) = criar_intencao(&db, &f, starts_at).await.unwrap();
+
+    let alterados = AppointmentModel::anonimizar_cliente(&db, f.tenant_id, "11987654321")
+        .await
+        .unwrap();
+    assert_eq!(alterados, 1);
+
+    let appt = AppointmentModel::find_by_id(&db, appointment_id).await.unwrap().unwrap();
+    assert_eq!(appt.client_name, "Cliente removido");
+    assert_eq!(appt.client_phone, "00000000000");
+    assert!(appt.client_email.is_none());
+
+    limpar_fixture(&db, f.tenant_id).await;
+}
