@@ -6,7 +6,8 @@
     "dev": "nuxt dev",
     "build": "nuxt build",
     "preview": "nuxt preview",
-    "typecheck": "nuxt typecheck"
+    "typecheck": "nuxt typecheck",
+    "test": "vitest run"
   },
   "dependencies": {
     "@pinia/nuxt": "^0.9.0",
@@ -17,6 +18,9 @@
   },
   "devDependencies": {
     "@nuxtjs/tailwindcss": "^6.12.0",
-    "typescript": "^5.7.0"
+    "@types/node": "^26.6.5",
+    "typescript": "^5.7.0",
+    "vitest": "^5.0.4",
+    "vue-tsc": "^3.3.13"
   }
 }

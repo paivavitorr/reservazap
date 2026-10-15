@@ -1,21 +1,31 @@
 import { defineStore } from 'pinia'
 import type {
-  CatalogResponse,
+  AvailabilityResponse,
   BookingIntentPayload,
   BookingIntentResponse,
   BookingStatusResponse,
-  Service,
+  CatalogResponse,
   Professional,
+  Service,
+  Slot,
 } from '~/types/booking'
 
 type BookingStep = 'catalog' | 'selecting' | 'hold' | 'confirmed' | 'expired'
+type ApiClient = ReturnType<typeof $fetch.create>
+
+/** Fora do state do Pinia: não serializa no payload SSR. */
+let api: ApiClient | null = null
+/** Guarda contra respostas de disponibilidade fora de ordem. */
+let availabilityRequest = 0
 
 interface BookingState {
   step: BookingStep
   catalog: CatalogResponse | null
+  availability: AvailabilityResponse | null
   selectedService: Service | null
   selectedProfessional: Professional | null
-  selectedTime: string | null
+  selectedDay: string | null
+  selectedSlot: Slot | null
   clientName: string
   clientPhone: string
   clientEmail: string
@@ -28,9 +38,11 @@ export const useBookingStore = defineStore('booking', {
   state: (): BookingState => ({
     step: 'catalog',
     catalog: null,
+    availability: null,
     selectedService: null,
     selectedProfessional: null,
-    selectedTime: null,
+    selectedDay: null,
+    selectedSlot: null,
     clientName: '',
     clientPhone: '',
     clientEmail: '',
@@ -42,93 +54,133 @@ export const useBookingStore = defineStore('booking', {
   getters: {
     signalAmountFormatted: (state) => {
       if (!state.hold) return ''
-      return (state.hold.signal.amount_in_cents / 100).toLocaleString('pt-BR', {
-        style: 'currency',
-        currency: 'BRL',
-      })
+      return formatCents(state.hold.signal.amount_in_cents)
     },
 
     holdRemainingSeconds: (state) => {
       if (!state.hold) return 0
       const expires = new Date(state.hold.hold_expires_at).getTime()
-      const now = Date.now()
-      return Math.max(0, Math.floor((expires - now) / 1000))
+      return Math.max(0, Math.floor((expires - Date.now()) / 1000))
+    },
+
+    selectedDayLabel: (state) => {
+      if (!state.selectedSlot || !state.selectedDay) return ''
+      return `${state.selectedDay} às ${state.selectedSlot.label}`
     },
 
     canSubmit: (state) =>
       !!state.selectedService &&
       !!state.selectedProfessional &&
-      !!state.selectedTime &&
-      state.clientName.trim().length > 0 &&
-      state.clientPhone.trim().length > 0,
+      !!state.selectedSlot &&
+      state.clientName.trim().length >= 2 &&
+      state.clientPhone.replace(/\D/g, '').length >= 10,
   },
 
   actions: {
+    /** Chamar no `setup()` da página — fixa a baseURL para uso fora do contexto. */
+    init(client: ApiClient) {
+      api = client
+    },
+
     async fetchCatalog(slug: string) {
+      if (!api) return
       this.loading = true
       this.error = null
       try {
-        const config = useRuntimeConfig()
-        const data = await $fetch<CatalogResponse>(
-          `${config.public.apiBase}/public/${slug}/catalog`
-        )
-        this.catalog = data
+        this.catalog = await api!<CatalogResponse>(`/public/${slug}/catalog`)
         this.step = 'catalog'
-      } catch (e: any) {
-        this.error = e.data?.message || 'Erro ao carregar catálogo'
+      } catch (e: unknown) {
+        this.error = mensagemDeErro(e, 'Estabelecimento não encontrado')
       } finally {
         this.loading = false
       }
     },
 
-    async submitBooking(slug: string) {
-      if (!this.canSubmit || !this.selectedService || !this.selectedProfessional || !this.selectedTime) return
+    async fetchAvailability(slug: string) {
+      if (!api || !this.selectedService || !this.selectedProfessional) return
+      const pedido = ++availabilityRequest
+      this.loading = true
+      try {
+        const data = await api!<AvailabilityResponse>(`/public/${slug}/availability`, {
+          query: {
+            service_id: this.selectedService.id,
+            professional_id: this.selectedProfessional.id,
+            days: 7,
+          },
+        })
+        if (pedido !== availabilityRequest) return // resposta obsoleta
+        this.availability = data
+        if (!this.selectedDay) {
+          const primeiroDia = data.days.find((d) => d.slots.length > 0)
+          this.selectedDay = primeiroDia?.date ?? data.days[0]?.date ?? null
+        }
+      } catch (e: unknown) {
+        if (pedido !== availabilityRequest) return
+        this.error = mensagemDeErro(e, 'Erro ao carregar horários')
+      } finally {
+        if (pedido === availabilityRequest) this.loading = false
+      }
+    },
 
+    async submitBooking(slug: string) {
+      if (!api || !this.canSubmit || !this.selectedService || !this.selectedProfessional || !this.selectedSlot) return
       this.loading = true
       this.error = null
       try {
-        const config = useRuntimeConfig()
         const payload: BookingIntentPayload = {
           service_id: this.selectedService.id,
           professional_id: this.selectedProfessional.id,
-          starts_at: this.selectedTime,
-          client_name: this.clientName,
+          starts_at: this.selectedSlot.starts_at,
+          client_name: this.clientName.trim(),
           client_phone: this.clientPhone,
-          client_email: this.clientEmail || undefined,
+          client_email: this.clientEmail.trim() || undefined,
         }
-        const data = await $fetch<BookingIntentResponse>(
-          `${config.public.apiBase}/public/${slug}/bookings/intent`,
-          { method: 'POST', body: payload }
-        )
-        this.hold = data
+        this.hold = await api!<BookingIntentResponse>(`/public/${slug}/bookings/intent`, {
+          method: 'POST',
+          body: payload,
+        })
         this.step = 'hold'
-      } catch (e: any) {
-        this.error = e.data?.message || 'Erro ao criar agendamento'
+      } catch (e: unknown) {
+        this.error = mensagemDeErro(e, 'Erro ao criar agendamento')
       } finally {
         this.loading = false
       }
     },
 
     async checkStatus(slug: string) {
-      if (!this.hold) return
+      if (!api || !this.hold) return
       try {
-        const config = useRuntimeConfig()
-        const data = await $fetch<BookingStatusResponse>(
-          `${config.public.apiBase}/public/${slug}/bookings/${this.hold.appointment_id}/status`
+        const data = await api!<BookingStatusResponse>(
+          `/public/${slug}/bookings/${this.hold.appointment_id}/status`
         )
         if (data.status === 'confirmed') {
           this.step = 'confirmed'
-        } else if (data.status === 'expired') {
+        } else if (data.status === 'expired' || data.status === 'cancelled') {
           this.step = 'expired'
         }
       } catch {
-        // silencioso — polling tolera falhas
+        // polling tolera falhas transitórias
       }
     },
 
     selectService(service: Service) {
       this.selectedService = service
+      this.selectedProfessional = null
+      this.selectedSlot = null
+      this.availability = null
+      this.selectedDay = null
       this.step = 'selecting'
+    },
+
+    selectProfessional(professional: Professional) {
+      this.selectedProfessional = professional
+      this.selectedSlot = null
+      this.availability = null
+      this.selectedDay = null
+    },
+
+    selectSlot(slot: Slot) {
+      this.selectedSlot = slot
     },
 
     reset() {
@@ -136,3 +188,8 @@ export const useBookingStore = defineStore('booking', {
     },
   },
 })
+
+function mensagemDeErro(e: unknown, fallback: string): string {
+  const err = e as { data?: { description?: string; message?: string }; message?: string }
+  return err?.data?.description || err?.data?.message || err?.message || fallback
+}

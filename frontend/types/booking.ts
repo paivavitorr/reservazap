@@ -2,6 +2,8 @@ export interface Tenant {
   id: string
   name: string
   slug: string
+  timezone: string
+  booking_hold_minutes: number
 }
 
 export interface Service {
@@ -22,6 +24,23 @@ export interface CatalogResponse {
   tenant: Tenant
   services: Service[]
   professionals: Professional[]
+}
+
+export interface Slot {
+  starts_at: string
+  label: string
+}
+
+export interface DayAvailability {
+  date: string
+  weekday: string
+  slots: Slot[]
+}
+
+export interface AvailabilityResponse {
+  timezone: string
+  duration_minutes: number
+  days: DayAvailability[]
 }
 
 export interface BookingIntentPayload {
